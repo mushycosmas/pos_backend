@@ -45,6 +45,10 @@ urlpatterns = [
         'api/v1/',
         include('apps.branches.urls')
     ),
+    path(
+    'api/v1/auth/',
+    include('apps.accounts.urls')
+   ),
 
     # =========================================================
     # CUSTOMERS
