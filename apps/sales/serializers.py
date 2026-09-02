@@ -1,4 +1,3 @@
-
 from decimal import Decimal
 
 from django.db import transaction
@@ -28,22 +27,22 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
     product_name = serializers.CharField(
         source="product.name",
-        read_only=True
+        read_only=True,
     )
 
     product_sku = serializers.CharField(
         source="product.sku",
-        read_only=True
+        read_only=True,
     )
 
     product_barcode = serializers.CharField(
         source="product.barcode",
-        read_only=True
+        read_only=True,
     )
 
     product_details = ProductSerializer(
         source="product",
-        read_only=True
+        read_only=True,
     )
 
     class Meta:
@@ -83,18 +82,14 @@ class SaleListSerializer(serializers.ModelSerializer):
 
     branch_name = serializers.CharField(
         source="branch.name",
-        read_only=True
+        read_only=True,
     )
 
-    customer_name = serializers.CharField(
-        source="customer.name",
-        read_only=True
-    )
+    customer_display_name = serializers.SerializerMethodField()
 
-    customer_phone = serializers.CharField(
-        source="customer.phone",
-        read_only=True
-    )
+    customer_display_phone = serializers.SerializerMethodField()
+
+    created_by_name = serializers.SerializerMethodField()
 
     item_count = serializers.SerializerMethodField()
 
@@ -111,8 +106,12 @@ class SaleListSerializer(serializers.ModelSerializer):
 
             # Customer
             "customer",
-            "customer_name",
-            "customer_phone",
+            "customer_display_name",
+            "customer_display_phone",
+
+            # User
+            "created_by",
+            "created_by_name",
 
             # Amounts
             "subtotal",
@@ -125,6 +124,8 @@ class SaleListSerializer(serializers.ModelSerializer):
             "payment_method",
             "amount_paid",
             "change",
+            "payment_phone",
+            "transaction_reference",
 
             # Status
             "status",
@@ -144,14 +145,51 @@ class SaleListSerializer(serializers.ModelSerializer):
             "id",
             "invoice_number",
             "branch_name",
-            "customer_name",
-            "customer_phone",
+            "customer_display_name",
+            "customer_display_phone",
+            "created_by",
+            "created_by_name",
             "item_count",
             "created_at",
             "updated_at",
         ]
 
+    def get_customer_display_name(self, obj):
+
+        return (
+            obj.customer_name
+            or (
+                obj.customer.name
+                if obj.customer
+                else "Walk-in Customer"
+            )
+        )
+
+    def get_customer_display_phone(self, obj):
+
+        return (
+            obj.customer_phone
+            or (
+                obj.customer.phone
+                if obj.customer
+                else None
+            )
+        )
+
+    def get_created_by_name(self, obj):
+
+        if not obj.created_by:
+            return None
+
+        full_name = obj.created_by.get_full_name()
+
+        return (
+            full_name
+            or obj.created_by.username
+        )
+
     def get_item_count(self, obj):
+
         return obj.items.count()
 
 
@@ -163,18 +201,20 @@ class SaleDetailSerializer(serializers.ModelSerializer):
 
     items = SaleItemSerializer(
         many=True,
-        read_only=True
+        read_only=True,
     )
 
     branch_details = BranchSerializer(
         source="branch",
-        read_only=True
+        read_only=True,
     )
 
     customer_details = CustomerSerializer(
         source="customer",
-        read_only=True
+        read_only=True,
     )
+
+    created_by_name = serializers.SerializerMethodField()
 
     payment_status = serializers.SerializerMethodField()
 
@@ -194,6 +234,12 @@ class SaleDetailSerializer(serializers.ModelSerializer):
             # Customer
             "customer",
             "customer_details",
+            "customer_name",
+            "customer_phone",
+
+            # User
+            "created_by",
+            "created_by_name",
 
             # Amounts
             "subtotal",
@@ -206,6 +252,8 @@ class SaleDetailSerializer(serializers.ModelSerializer):
             "payment_method",
             "amount_paid",
             "change",
+            "payment_phone",
+            "transaction_reference",
 
             # Status
             "status",
@@ -230,12 +278,30 @@ class SaleDetailSerializer(serializers.ModelSerializer):
             "invoice_number",
             "branch_details",
             "customer_details",
+            "created_by",
+            "created_by_name",
             "payment_status",
             "payments",
             "items",
             "created_at",
             "updated_at",
         ]
+
+    # =====================================================
+    # CREATED BY
+    # =====================================================
+
+    def get_created_by_name(self, obj):
+
+        if not obj.created_by:
+            return None
+
+        full_name = obj.created_by.get_full_name()
+
+        return (
+            full_name
+            or obj.created_by.username
+        )
 
     # =====================================================
     # PAYMENT STATUS
@@ -257,15 +323,16 @@ class SaleDetailSerializer(serializers.ModelSerializer):
                 (
                     payment.amount
                     for payment in payments
-                    if payment.status == "completed"
+                    if str(payment.status).upper()
+                    in ["COMPLETED", "PAID"]
                 ),
-                Decimal("0.00")
+                Decimal("0.00"),
             )
 
             if total_paid >= obj.total:
                 return "paid"
 
-            if total_paid > 0:
+            if total_paid > Decimal("0.00"):
                 return "partial"
 
             return "pending"
@@ -289,7 +356,8 @@ class SaleDetailSerializer(serializers.ModelSerializer):
 
             return PaymentSerializer(
                 payments,
-                many=True
+                many=True,
+                context=self.context,
             ).data
 
         except Exception:
@@ -302,23 +370,53 @@ class SaleDetailSerializer(serializers.ModelSerializer):
 
 class SaleCreateSerializer(serializers.Serializer):
 
+    # =====================================================
+    # BRANCH
+    # =====================================================
+
     branch_id = serializers.IntegerField()
+
+    # =====================================================
+    # CUSTOMER
+    # =====================================================
 
     customer_id = serializers.IntegerField(
         required=False,
-        allow_null=True
+        allow_null=True,
     )
+
+    customer_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=255,
+    )
+
+    customer_phone = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=20,
+    )
+
+    # =====================================================
+    # ITEMS
+    # =====================================================
 
     items = serializers.ListField(
         child=serializers.DictField(),
-        min_length=1
+        min_length=1,
     )
+
+    # =====================================================
+    # DISCOUNT
+    # =====================================================
 
     discount = serializers.DecimalField(
         max_digits=15,
         decimal_places=2,
         required=False,
-        default=Decimal("0.00")
+        default=Decimal("0.00"),
     )
 
     discount_type = serializers.ChoiceField(
@@ -326,31 +424,58 @@ class SaleCreateSerializer(serializers.Serializer):
             ("fixed", "Fixed"),
             ("percentage", "Percentage"),
         ],
-        default="fixed"
+        default="fixed",
     )
+
+    # =====================================================
+    # NOTES
+    # =====================================================
 
     notes = serializers.CharField(
         required=False,
         allow_blank=True,
-        default=""
+        default="",
     )
+
+    # =====================================================
+    # PAYMENT
+    # =====================================================
 
     payment_method = serializers.ChoiceField(
         choices=[
             ("CASH", "Cash"),
             ("CARD", "Card"),
             ("M-PESA", "M-PESA"),
+            ("TIGO-PESA", "Tigo Pesa"),
+            ("AIRTEL-MONEY", "Airtel Money"),
+            ("HALOPESA", "HaloPesa"),
+            ("MIXX-BY-YAS", "Mixx by Yas"),
+            ("EZY-PESA", "EzyPesa"),
             ("BANK_TRANSFER", "Bank Transfer"),
         ],
         required=False,
-        default="CASH"
+        default="CASH",
     )
 
     amount_paid = serializers.DecimalField(
         max_digits=15,
         decimal_places=2,
         required=False,
-        default=Decimal("0.00")
+        default=Decimal("0.00"),
+    )
+
+    payment_phone = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=20,
+    )
+
+    transaction_reference = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+        max_length=100,
     )
 
     # =====================================================
@@ -361,7 +486,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
         if not Branch.objects.filter(
             id=value,
-            is_active=True
+            is_active=True,
         ).exists():
 
             raise serializers.ValidationError(
@@ -381,7 +506,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
         if not Customer.objects.filter(
             id=value,
-            is_active=True
+            is_active=True,
         ).exists():
 
             raise serializers.ValidationError(
@@ -423,16 +548,14 @@ class SaleCreateSerializer(serializers.Serializer):
             )
 
             if not product_id:
-
                 raise serializers.ValidationError({
                     prefix: "product_id is required."
                 })
 
             try:
-
                 product = Product.objects.get(
                     id=product_id,
-                    is_active=True
+                    is_active=True,
                 )
 
             except Product.DoesNotExist:
@@ -453,27 +576,27 @@ class SaleCreateSerializer(serializers.Serializer):
             )
 
             if quantity is None:
-
                 raise serializers.ValidationError({
                     prefix: "quantity is required."
                 })
 
             try:
-
                 quantity = int(quantity)
 
             except (TypeError, ValueError):
 
                 raise serializers.ValidationError({
-                    prefix: "Quantity must be a whole number."
+                    prefix: (
+                        "Quantity must be a whole number."
+                    )
                 })
 
             if quantity <= 0:
 
                 raise serializers.ValidationError({
                     prefix: (
-                        "Quantity must be "
-                        "greater than zero."
+                        "Quantity must be greater "
+                        "than zero."
                     )
                 })
 
@@ -483,15 +606,13 @@ class SaleCreateSerializer(serializers.Serializer):
             # STOCK
             # -------------------------------------------------
 
-            stock = Stock.objects.filter(
-                product=product,
-                branch_id=branch_id
-            ).first()
-
-            available = (
-                stock.quantity
-                if stock
-                else 0
+            stock = (
+                Stock.objects
+                .filter(
+                    product=product,
+                    branch_id=branch_id,
+                )
+                .first()
             )
 
             if not stock:
@@ -502,6 +623,8 @@ class SaleCreateSerializer(serializers.Serializer):
                         f"{product.name}."
                     )
                 })
+
+            available = stock.quantity
 
             if available < quantity:
 
@@ -523,10 +646,12 @@ class SaleCreateSerializer(serializers.Serializer):
 
             if unit_price in (
                 None,
-                ""
+                "",
             ):
 
-                unit_price = product.selling_price
+                unit_price = (
+                    product.selling_price
+                )
 
             try:
 
@@ -557,7 +682,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
             item_discount = item.get(
                 "discount",
-                0
+                0,
             )
 
             try:
@@ -589,7 +714,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
             item_tax = item.get(
                 "tax",
-                0
+                0,
             )
 
             try:
@@ -625,20 +750,19 @@ class SaleCreateSerializer(serializers.Serializer):
 
         discount = data.get(
             "discount",
-            Decimal("0.00")
+            Decimal("0.00"),
         )
 
         discount_type = data.get(
             "discount_type",
-            "fixed"
+            "fixed",
         )
 
         if discount < Decimal("0.00"):
 
             raise serializers.ValidationError({
                 "discount": (
-                    "Discount cannot "
-                    "be negative."
+                    "Discount cannot be negative."
                 )
             })
 
@@ -704,7 +828,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
         amount_paid = data.get(
             "amount_paid",
-            Decimal("0.00")
+            Decimal("0.00"),
         )
 
         if amount_paid < Decimal("0.00"):
@@ -727,46 +851,84 @@ class SaleCreateSerializer(serializers.Serializer):
     @transaction.atomic
     def create(self, validated_data):
 
-        branch_id = validated_data[
-            "branch_id"
-        ]
+        # =================================================
+        # AUTHENTICATED USER
+        # =================================================
+
+        request = self.context.get(
+            "request"
+        )
+
+        if not request:
+
+            raise serializers.ValidationError(
+                "Request context is required."
+            )
+
+        user = request.user
+
+        if not user or not user.is_authenticated:
+
+            raise serializers.ValidationError(
+                "Authenticated user is required."
+            )
+
+        # =================================================
+        # BASIC DATA
+        # =================================================
+
+        branch_id = validated_data["branch_id"]
 
         customer_id = validated_data.get(
             "customer_id"
         )
 
-        items_data = validated_data[
-            "items"
-        ]
+        customer_name = validated_data.get(
+            "customer_name"
+        )
+
+        customer_phone = validated_data.get(
+            "customer_phone"
+        )
+
+        items_data = validated_data["items"]
 
         discount = validated_data.get(
             "discount",
-            Decimal("0.00")
+            Decimal("0.00"),
         )
 
         discount_type = validated_data.get(
             "discount_type",
-            "fixed"
+            "fixed",
         )
 
         notes = validated_data.get(
             "notes",
-            ""
+            "",
         )
 
         payment_method = validated_data.get(
             "payment_method",
-            "CASH"
+            "CASH",
         )
 
         amount_paid = validated_data.get(
             "amount_paid",
-            Decimal("0.00")
+            Decimal("0.00"),
         )
 
-        subtotal = validated_data[
-            "subtotal"
-        ]
+        payment_phone = validated_data.get(
+            "payment_phone"
+        )
+
+        transaction_reference = (
+            validated_data.get(
+                "transaction_reference"
+            )
+        )
+
+        subtotal = validated_data["subtotal"]
 
         # =================================================
         # SALE DISCOUNT
@@ -819,7 +981,8 @@ class SaleCreateSerializer(serializers.Serializer):
         # =================================================
 
         change = (
-            amount_paid - total
+            amount_paid
+            - total
         )
 
         if change < Decimal("0.00"):
@@ -832,23 +995,32 @@ class SaleCreateSerializer(serializers.Serializer):
 
         if amount_paid >= total:
 
-            status = "COMPLETED"
+            sale_status = "COMPLETED"
 
         elif amount_paid > Decimal("0.00"):
 
-            status = "PENDING"
+            sale_status = "PENDING"
 
         else:
 
-            status = "PENDING"
+            sale_status = "PENDING"
 
         # =================================================
         # GET BRANCH
         # =================================================
 
-        branch = Branch.objects.get(
-            id=branch_id
-        )
+        try:
+
+            branch = Branch.objects.get(
+                id=branch_id,
+                is_active=True,
+            )
+
+        except Branch.DoesNotExist:
+
+            raise serializers.ValidationError(
+                "Branch not found or inactive."
+            )
 
         # =================================================
         # GET CUSTOMER
@@ -858,29 +1030,41 @@ class SaleCreateSerializer(serializers.Serializer):
 
         if customer_id:
 
-            customer = Customer.objects.get(
-                id=customer_id
-            )
+            try:
+
+                customer = Customer.objects.get(
+                    id=customer_id,
+                    is_active=True,
+                )
+
+            except Customer.DoesNotExist:
+
+                raise serializers.ValidationError(
+                    "Customer not found or inactive."
+                )
 
         # =================================================
         # CUSTOMER SNAPSHOT
         # =================================================
 
-        customer_name = None
-        customer_phone = None
-
         if customer:
 
-            customer_name = getattr(
-                customer,
-                "name",
-                None
+            customer_name = (
+                customer_name
+                or getattr(
+                    customer,
+                    "name",
+                    None,
+                )
             )
 
-            customer_phone = getattr(
-                customer,
-                "phone",
-                None
+            customer_phone = (
+                customer_phone
+                or getattr(
+                    customer,
+                    "phone",
+                    None,
+                )
             )
 
         # =================================================
@@ -890,6 +1074,11 @@ class SaleCreateSerializer(serializers.Serializer):
         sale = Sale.objects.create(
 
             branch=branch,
+
+            # IMPORTANT:
+            # Never take created_by from frontend.
+            # Always use the authenticated Django user.
+            created_by=user,
 
             customer=customer,
 
@@ -913,7 +1102,13 @@ class SaleCreateSerializer(serializers.Serializer):
 
             change=change,
 
-            status=status,
+            payment_phone=payment_phone,
+
+            transaction_reference=(
+                transaction_reference
+            ),
+
+            status=sale_status,
 
             notes=notes,
         )
@@ -924,9 +1119,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
         for item_data in items_data:
 
-            product_id = item_data[
-                "product_id"
-            ]
+            product_id = item_data["product_id"]
 
             quantity = int(
                 item_data["quantity"]
@@ -940,7 +1133,7 @@ class SaleCreateSerializer(serializers.Serializer):
                 str(
                     item_data.get(
                         "discount",
-                        0
+                        0,
                     )
                 )
             )
@@ -949,14 +1142,45 @@ class SaleCreateSerializer(serializers.Serializer):
                 str(
                     item_data.get(
                         "tax",
-                        0
+                        0,
                     )
                 )
             )
 
             product = Product.objects.get(
-                id=product_id
+                id=product_id,
+                is_active=True,
             )
+
+            # -------------------------------------------------
+            # LOCK STOCK
+            # -------------------------------------------------
+
+            stock = (
+                Stock.objects
+                .select_for_update()
+                .filter(
+                    product=product,
+                    branch_id=branch_id,
+                )
+                .first()
+            )
+
+            if not stock:
+
+                raise serializers.ValidationError(
+                    f"No stock found for "
+                    f"{product.name}."
+                )
+
+            if stock.quantity < quantity:
+
+                raise serializers.ValidationError(
+                    f"Insufficient stock for "
+                    f"{product.name}. "
+                    f"Available: "
+                    f"{stock.quantity}."
+                )
 
             # -------------------------------------------------
             # ITEM TOTAL
@@ -976,7 +1200,7 @@ class SaleCreateSerializer(serializers.Serializer):
                 item_total = Decimal("0.00")
 
             # -------------------------------------------------
-            # CREATE ITEM
+            # CREATE SALE ITEM
             # -------------------------------------------------
 
             SaleItem.objects.create(
@@ -997,34 +1221,6 @@ class SaleCreateSerializer(serializers.Serializer):
             )
 
             # -------------------------------------------------
-            # LOCK STOCK
-            # -------------------------------------------------
-
-            stock = (
-                Stock.objects
-                .select_for_update()
-                .filter(
-                    product=product,
-                    branch_id=branch_id
-                )
-                .first()
-            )
-
-            if not stock:
-
-                raise serializers.ValidationError(
-                    f"No stock found for {product.name}."
-                )
-
-            if stock.quantity < quantity:
-
-                raise serializers.ValidationError(
-                    f"Insufficient stock for "
-                    f"{product.name}. "
-                    f"Available: {stock.quantity}."
-                )
-
-            # -------------------------------------------------
             # UPDATE STOCK
             # -------------------------------------------------
 
@@ -1040,7 +1236,7 @@ class SaleCreateSerializer(serializers.Serializer):
 
             if hasattr(
                 stock,
-                "last_updated"
+                "last_updated",
             ):
 
                 stock.last_updated = timezone.now()
@@ -1064,27 +1260,15 @@ class SaleCreateSerializer(serializers.Serializer):
                 "previous_quantity": old_quantity,
                 "new_quantity": stock.quantity,
                 "movement_type": "SALE",
-                "reference": f"Sale {sale.id}",
-                "created_by": None,
+                "reference": (
+                    f"Sale {sale.invoice_number}"
+                ),
+                "created_by": user,
             }
 
-            # Add company only if your StockMovement model
-            # actually contains this field.
             if hasattr(
                 StockMovement,
-                "company"
-            ):
-
-                movement_data["company"] = getattr(
-                    product,
-                    "company",
-                    None
-                )
-
-            # Add notes only if your model has this field.
-            if hasattr(
-                StockMovement,
-                "notes"
+                "notes",
             ):
 
                 movement_data["notes"] = (
@@ -1097,37 +1281,55 @@ class SaleCreateSerializer(serializers.Serializer):
             )
 
         # =================================================
-        # OPTIONAL PAYMENT RECORD
+        # CREATE PAYMENT
         # =================================================
 
         if amount_paid > Decimal("0.00"):
 
-            try:
+            from apps.payments.models import Payment
 
-                from apps.payments.models import Payment
+            payment_data = {
+                "sale": sale,
+                "method": payment_method,
+                "amount": amount_paid,
+                "status": "COMPLETED",
+                "payment_date": timezone.now(),
+            }
 
-                Payment.objects.create(
-                    sale=sale,
-                    method=payment_method,
-                    amount=amount_paid,
-                    reference="",
-                    status="completed",
-                    payment_date=timezone.now(),
-                    processed_by=None,
-                    branch=branch,
-                    company=(
-                        getattr(
-                            branch,
-                            "company",
-                            None
-                        )
-                    ),
+            # -------------------------------------------------
+            # OPTIONAL PAYMENT FIELDS
+            # -------------------------------------------------
+
+            payment_model_fields = {
+                field.name
+                for field in Payment._meta.get_fields()
+            }
+
+            if "reference" in payment_model_fields:
+
+                payment_data["reference"] = (
+                    transaction_reference or ""
                 )
 
-            except Exception:
-                # Sale should not fail only because the
-                # optional payment model differs.
-                pass
+            if "processed_by" in payment_model_fields:
+
+                payment_data["processed_by"] = user
+
+            if "branch" in payment_model_fields:
+
+                payment_data["branch"] = branch
+
+            if "company" in payment_model_fields:
+
+                payment_data["company"] = getattr(
+                    branch,
+                    "company",
+                    None,
+                )
+
+            Payment.objects.create(
+                **payment_data
+            )
 
         return sale
 
@@ -1147,6 +1349,8 @@ class SaleUpdateSerializer(serializers.ModelSerializer):
             "tax_rate",
             "payment_method",
             "amount_paid",
+            "payment_phone",
+            "transaction_reference",
             "notes",
             "status",
         ]
@@ -1181,7 +1385,7 @@ class SaleCancelSerializer(serializers.Serializer):
 
     reason = serializers.CharField(
         required=True,
-        allow_blank=False
+        allow_blank=False,
     )
 
     def validate(self, data):
@@ -1233,34 +1437,34 @@ class SaleReceiptSerializer(serializers.Serializer):
 
     subtotal = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     discount = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     tax = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     total = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     payment_method = serializers.CharField()
 
     payment_amount = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     change = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     def to_representation(self, instance):
@@ -1278,7 +1482,7 @@ class SaleReceiptSerializer(serializers.Serializer):
                 getattr(
                     sale.branch,
                     "location",
-                    ""
+                    "",
                 )
                 if sale.branch
                 else ""
@@ -1288,7 +1492,7 @@ class SaleReceiptSerializer(serializers.Serializer):
                 getattr(
                     sale.branch,
                     "phone",
-                    ""
+                    "",
                 )
                 if sale.branch
                 else ""
@@ -1371,24 +1575,24 @@ class SaleSummarySerializer(serializers.Serializer):
 
     total_sales = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     total_orders = serializers.IntegerField()
 
     average_order_value = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     total_tax = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     total_discount = serializers.DecimalField(
         max_digits=15,
-        decimal_places=2
+        decimal_places=2,
     )
 
     top_products = serializers.ListField()
@@ -1398,4 +1602,3 @@ class SaleSummarySerializer(serializers.Serializer):
     sales_by_day = serializers.DictField()
 
     payment_methods = serializers.DictField()
-

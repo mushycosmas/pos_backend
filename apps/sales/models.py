@@ -1,4 +1,3 @@
-
 from decimal import Decimal
 
 from django.core.validators import MinValueValidator
@@ -12,12 +11,32 @@ from django.utils import timezone
 
 class Sale(models.Model):
 
+    # =====================================================
+    # PAYMENT METHODS
+    # =====================================================
+
     PAYMENT_METHODS = (
+        # Cash
         ("CASH", "Cash"),
+
+        # Card
         ("CARD", "Card"),
+
+        # Mobile Money
         ("M-PESA", "M-PESA"),
+        ("TIGO-PESA", "Tigo Pesa"),
+        ("AIRTEL-MONEY", "Airtel Money"),
+        ("HALOPESA", "HaloPesa"),
+        ("MIXX-BY-YAS", "Mixx by Yas"),
+        ("EZY-PESA", "EzyPesa"),
+
+        # Bank
         ("BANK_TRANSFER", "Bank Transfer"),
     )
+
+    # =====================================================
+    # STATUS
+    # =====================================================
 
     STATUS_CHOICES = (
         ("PENDING", "Pending"),
@@ -36,6 +55,24 @@ class Sale(models.Model):
         null=True,
         blank=True,
         related_name="sales",
+    )
+
+    # =====================================================
+    # CREATED BY
+    #
+    # The authenticated user who created/processed the sale.
+    #
+    # Do NOT trust the frontend to provide this value.
+    # It should be assigned from request.user in the serializer
+    # or view.
+    # =====================================================
+
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_sales",
     )
 
     # =====================================================
@@ -64,8 +101,9 @@ class Sale(models.Model):
     # =====================================================
     # CUSTOMER SNAPSHOT
     #
-    # Keeps customer information at the time of sale.
-    # Useful even if the customer is later changed/deleted.
+    # Stores customer information at the time of sale.
+    # This preserves the information even if the customer
+    # record is later changed or deleted.
     # =====================================================
 
     customer_name = models.CharField(
@@ -104,6 +142,7 @@ class Sale(models.Model):
 
     # VAT percentage
     # Example: 18.00 = 18%
+
     tax_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -160,6 +199,35 @@ class Sale(models.Model):
     )
 
     # =====================================================
+    # MOBILE MONEY / BANK DETAILS
+    #
+    # Used for:
+    # - M-PESA
+    # - Tigo Pesa
+    # - Airtel Money
+    # - HaloPesa
+    # - Mixx by Yas
+    # - EzyPesa
+    # - Bank Transfer
+    #
+    # Not required for cash/card payments.
+    # =====================================================
+
+    payment_phone = models.CharField(
+        max_length=20,
+        null=True,
+        blank=True,
+        help_text="Phone number used for mobile money payment.",
+    )
+
+    transaction_reference = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Mobile money or bank transaction reference.",
+    )
+
+    # =====================================================
     # STATUS
     # =====================================================
 
@@ -180,9 +248,6 @@ class Sale(models.Model):
 
     # =====================================================
     # TIMESTAMPS
-    #
-    # default=timezone.now is migration-friendly because
-    # existing records can receive a timestamp.
     # =====================================================
 
     created_at = models.DateTimeField(
@@ -211,12 +276,17 @@ class Sale(models.Model):
 
         is_new = self.pk is None
 
-        # Automatically create invoice number after ID exists
+        # -------------------------------------------------
+        # CREATE INVOICE NUMBER AFTER ID EXISTS
+        # -------------------------------------------------
+
         if is_new and not self.invoice_number:
 
             super().save(*args, **kwargs)
 
-            self.invoice_number = f"INV-{self.id:06d}"
+            self.invoice_number = (
+                f"INV-{self.id:06d}"
+            )
 
             super().save(
                 update_fields=["invoice_number"]
@@ -224,7 +294,10 @@ class Sale(models.Model):
 
             return
 
-        # Update timestamp
+        # -------------------------------------------------
+        # UPDATE TIMESTAMP
+        # -------------------------------------------------
+
         self.updated_at = timezone.now()
 
         super().save(*args, **kwargs)
@@ -319,9 +392,6 @@ class SaleItem(models.Model):
 
     # =====================================================
     # TIMESTAMP
-    #
-    # Using default instead of auto_now_add makes migration
-    # easier when SaleItem already contains records.
     # =====================================================
 
     created_at = models.DateTimeField(
@@ -334,7 +404,10 @@ class SaleItem(models.Model):
 
     def save(self, *args, **kwargs):
 
-        # Automatically calculate item total
+        # -------------------------------------------------
+        # CALCULATE ITEM TOTAL
+        # -------------------------------------------------
+
         subtotal = (
             Decimal(self.quantity)
             * self.unit_price
@@ -344,6 +417,7 @@ class SaleItem(models.Model):
 
         subtotal += self.tax
 
+        # Prevent negative totals
         if subtotal < Decimal("0.00"):
             subtotal = Decimal("0.00")
 
@@ -359,4 +433,3 @@ class SaleItem(models.Model):
         return (
             f"{self.product.name} x {self.quantity}"
         )
-
