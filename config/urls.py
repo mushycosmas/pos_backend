@@ -130,4 +130,9 @@ urlpatterns = [
         'api/v1/',
         include('apps.suppliers.urls')
     ),
+    
+     path(
+        "api/v1/",
+        include("apps.returns.urls"),
+    ),
 ]
