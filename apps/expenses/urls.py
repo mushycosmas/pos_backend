@@ -5,42 +5,41 @@ from .views import (
     ExpenseViewSet,
     RecurringExpenseViewSet,
     ExpenseBudgetViewSet,
-    ExpenseAttachmentViewSet
+    ExpenseAttachmentViewSet,
 )
 
 
 router = DefaultRouter()
 
-
 router.register(
-    'expense-categories',
-    ExpenseCategoryViewSet
+    r"expense-categories",
+    ExpenseCategoryViewSet,
+    basename="expense-category",
 )
 
-
 router.register(
-    'expenses',
-    ExpenseViewSet
+    r"expenses",
+    ExpenseViewSet,
+    basename="expense",
 )
 
-
 router.register(
-    'recurring-expenses',
-    RecurringExpenseViewSet
+    r"recurring-expenses",
+    RecurringExpenseViewSet,
+    basename="recurring-expense",
 )
 
-
 router.register(
-    'expense-budgets',
-    ExpenseBudgetViewSet
+    r"expense-budgets",
+    ExpenseBudgetViewSet,
+    basename="expense-budget",
 )
 
-
 router.register(
-    'expense-attachments',
-    ExpenseAttachmentViewSet
+    r"expense-attachments",
+    ExpenseAttachmentViewSet,
+    basename="expense-attachment",
 )
-
 
 
 urlpatterns = router.urls
