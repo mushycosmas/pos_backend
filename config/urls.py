@@ -135,4 +135,8 @@ urlpatterns = [
         "api/v1/",
         include("apps.returns.urls"),
     ),
+     path(
+        "api/v1/",
+        include("apps.roles.urls"),
+    ),
 ]

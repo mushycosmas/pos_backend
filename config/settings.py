@@ -65,6 +65,8 @@ INSTALLED_APPS = [
     'apps.expenses',
     'apps.reports',
     'apps.returns',
+    "apps.paymentmethods",
+     "apps.roles",
 ]
 
 
