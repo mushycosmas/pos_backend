@@ -1,4 +1,3 @@
-
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import transaction
@@ -336,10 +335,12 @@ class PurchaseItemSerializer(
             )
         )
 
+        # ------------------------------------------------------
         # Always start with zero received.
         #
         # Receiving must happen through the
         # Purchase receive endpoint.
+        # ------------------------------------------------------
 
         validated_data[
             "received_quantity"
@@ -380,11 +381,7 @@ class PurchaseItemSerializer(
         )
 
         # ------------------------------------------------------
-        # IMPORTANT
-        # ------------------------------------------------------
-        #
         # Do not allow changing received_quantity directly.
-        #
         # ------------------------------------------------------
 
         validated_data.pop(
@@ -393,7 +390,7 @@ class PurchaseItemSerializer(
         )
 
         # ------------------------------------------------------
-        # Prevent reducing quantity below received quantity
+        # Prevent reducing quantity below received quantity.
         # ------------------------------------------------------
 
         if quantity < instance.received_quantity:
@@ -408,7 +405,7 @@ class PurchaseItemSerializer(
             )
 
         # ------------------------------------------------------
-        # Calculate total
+        # Calculate total.
         # ------------------------------------------------------
 
         validated_data["total"] = (
@@ -460,6 +457,12 @@ class PurchaseSerializer(
         source="company.name",
         read_only=True
     )
+
+    # ----------------------------------------------------------
+    # CREATED BY NAME
+    # ----------------------------------------------------------
+
+    created_by_name = serializers.SerializerMethodField()
 
     # ----------------------------------------------------------
     # ITEMS
@@ -539,7 +542,12 @@ class PurchaseSerializer(
 
             "notes",
 
+            # --------------------------------------------------
+            # CREATED BY
+            # --------------------------------------------------
+
             "created_by",
+            "created_by_name",
 
             "items",
 
@@ -560,6 +568,13 @@ class PurchaseSerializer(
             "branch_name",
             "company_name",
 
+            # --------------------------------------------------
+            # CREATED BY
+            # --------------------------------------------------
+
+            "created_by",
+            "created_by_name",
+
             "subtotal",
             "tax",
             "total",
@@ -574,6 +589,40 @@ class PurchaseSerializer(
             "created_at",
             "updated_at",
         ]
+
+    # ==========================================================
+    # CREATED BY NAME
+    # ==========================================================
+
+    def get_created_by_name(
+        self,
+        obj
+    ):
+
+        if not obj.created_by:
+            return "-"
+
+        return (
+            getattr(
+                obj.created_by,
+                "full_name",
+                None
+            )
+            or
+            getattr(
+                obj.created_by,
+                "name",
+                None
+            )
+            or
+            getattr(
+                obj.created_by,
+                "username",
+                None
+            )
+            or
+            str(obj.created_by)
+        )
 
     # ==========================================================
     # TOTAL ORDERED
@@ -693,15 +742,32 @@ class PurchaseSerializer(
         )
 
         # ------------------------------------------------------
-        # IMPORTANT
+        # CREATED BY
         # ------------------------------------------------------
         #
-        # If the frontend sends status="received" while
-        # creating a NEW purchase, we temporarily create it
-        # as ordered, create the items, then call receive().
+        # The frontend must NOT provide created_by.
         #
-        # This guarantees stock is updated.
+        # The backend determines the creator from the
+        # authenticated request.
         #
+        # ------------------------------------------------------
+
+        request = self.context.get(
+            "request"
+        )
+
+        if (
+            request is not None
+            and
+            request.user.is_authenticated
+        ):
+
+            validated_data["created_by"] = (
+                request.user
+            )
+
+        # ------------------------------------------------------
+        # REQUESTED STATUS
         # ------------------------------------------------------
 
         requested_status = validated_data.get(
@@ -759,7 +825,6 @@ class PurchaseSerializer(
                         0
                     )
                 )
-
             )
 
             tax_rate = Decimal(
@@ -829,10 +894,12 @@ class PurchaseSerializer(
                     "product"
                 ],
 
-                quantity=int(quantity),
+                quantity=int(
+                    quantity
+                ),
 
-                # NEVER trust received_quantity from
-                # the create request.
+                # NEVER trust received_quantity
+                # from create request.
                 received_quantity=0,
 
                 unit_cost=unit_cost,
@@ -898,30 +965,18 @@ class PurchaseSerializer(
         # ======================================================
         # AUTO RECEIVE IF CREATED AS RECEIVED
         # ======================================================
-        #
-        # This makes your existing frontend behavior safe.
-        #
-        # If frontend sends:
-        #
-        # status = "received"
-        #
-        # stock will actually be updated.
-        #
-        # ======================================================
 
         if should_receive:
 
-            # Use the logged-in user if available
-            request = self.context.get(
-                "request"
-            )
+            user = None
 
-            user = (
-                request.user
-                if request is not None
-                and request.user.is_authenticated
-                else None
-            )
+            if (
+                request is not None
+                and
+                request.user.is_authenticated
+            ):
+
+                user = request.user
 
             purchase.receive(
                 user=user
@@ -948,6 +1003,20 @@ class PurchaseSerializer(
 
         items_data = validated_data.pop(
             "items",
+            None
+        )
+
+        # ------------------------------------------------------
+        # CREATED BY PROTECTION
+        # ------------------------------------------------------
+        #
+        # Even if somebody manually attempts to send
+        # created_by during an update, ignore it.
+        #
+        # ------------------------------------------------------
+
+        validated_data.pop(
+            "created_by",
             None
         )
 
@@ -994,7 +1063,7 @@ class PurchaseSerializer(
             total_tax = Decimal("0")
 
             # --------------------------------------------------
-            # Delete existing items
+            # DELETE EXISTING ITEMS
             # --------------------------------------------------
 
             instance.items.all().delete()
@@ -1099,8 +1168,12 @@ class PurchaseSerializer(
                         "product"
                     ],
 
-                    quantity=int(quantity),
+                    quantity=int(
+                        quantity
+                    ),
 
+                    # Never restore received quantity
+                    # from frontend.
                     received_quantity=0,
 
                     unit_cost=unit_cost,
@@ -1164,4 +1237,3 @@ class PurchaseSerializer(
             )
 
         return instance
-

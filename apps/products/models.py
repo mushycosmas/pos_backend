@@ -138,6 +138,18 @@ class Product(models.Model):
     )
 
     # ------------------------------------------------------
+    # CREATED BY
+    # ------------------------------------------------------
+
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_products"
+    )
+
+    # ------------------------------------------------------
     # PRICING
     # ------------------------------------------------------
 

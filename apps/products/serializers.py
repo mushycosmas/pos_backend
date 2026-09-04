@@ -94,6 +94,12 @@ class ProductSerializer(serializers.ModelSerializer):
     )
 
     # ======================================================
+    # CREATED BY
+    # ======================================================
+
+    created_by_name = serializers.SerializerMethodField()
+
+    # ======================================================
     # BRANCH
     # ======================================================
 
@@ -106,8 +112,6 @@ class ProductSerializer(serializers.ModelSerializer):
 
     # ======================================================
     # INITIAL STOCK
-    #
-    # This is what frontend sends when creating product.
     # ======================================================
 
     stock = serializers.IntegerField(
@@ -148,6 +152,10 @@ class ProductSerializer(serializers.ModelSerializer):
 
             "branch",
 
+            # Created by
+            "created_by",
+            "created_by_name",
+
             "cost_price",
             "selling_price",
             "wholesale_price",
@@ -173,14 +181,36 @@ class ProductSerializer(serializers.ModelSerializer):
 
         read_only_fields = [
             "id",
+
             "category_name",
             "brand_name",
             "supplier_name",
             "company_name",
+
+            "created_by",
+            "created_by_name",
+
             "current_stock",
+
             "created_at",
             "updated_at",
         ]
+
+    # ======================================================
+    # CREATED BY NAME
+    # ======================================================
+
+    def get_created_by_name(self, obj):
+
+        if not obj.created_by:
+            return "-"
+
+        return (
+            getattr(obj.created_by, "full_name", None)
+            or getattr(obj.created_by, "name", None)
+            or getattr(obj.created_by, "username", None)
+            or str(obj.created_by)
+        )
 
     # ======================================================
     # CREATE PRODUCT
@@ -188,24 +218,46 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
 
+        # --------------------------------------------------
         # Get initial stock
+        # --------------------------------------------------
+
         stock_quantity = validated_data.pop(
             "stock",
             0
         )
 
+        # --------------------------------------------------
         # Get branch
+        # --------------------------------------------------
+
         branch_id = validated_data.pop(
             "branch",
             1
         )
 
+        # --------------------------------------------------
+        # Get authenticated user
+        # --------------------------------------------------
+
+        request = self.context.get("request")
+
+        if request and request.user.is_authenticated:
+
+            validated_data["created_by"] = request.user
+
+        # --------------------------------------------------
         # Create product
+        # --------------------------------------------------
+
         product = Product.objects.create(
             **validated_data
         )
 
+        # --------------------------------------------------
         # Create stock record
+        # --------------------------------------------------
+
         Stock.objects.create(
             product=product,
             branch_id=branch_id,
@@ -230,14 +282,19 @@ class ProductSerializer(serializers.ModelSerializer):
             None
         )
 
+        # --------------------------------------------------
         # Update product
+        # --------------------------------------------------
+
         instance = super().update(
             instance,
             validated_data
         )
 
-        # Only modify stock if frontend
-        # explicitly sent stock
+        # --------------------------------------------------
+        # Update stock only if explicitly provided
+        # --------------------------------------------------
+
         if stock_quantity is not None:
 
             if branch_id is None:
@@ -247,7 +304,9 @@ class ProductSerializer(serializers.ModelSerializer):
                 ).first()
 
                 if stock:
+
                     stock.quantity = stock_quantity
+
                     stock.save(
                         update_fields=["quantity"]
                     )
