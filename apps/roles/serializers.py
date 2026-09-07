@@ -1,3 +1,4 @@
+
 from django.contrib.auth.models import Permission
 from rest_framework import serializers
 
@@ -5,6 +6,7 @@ from .models import Role
 
 
 class PermissionSerializer(serializers.ModelSerializer):
+
     content_type_name = serializers.CharField(
         source="content_type.model",
         read_only=True,
@@ -38,6 +40,7 @@ class PermissionSerializer(serializers.ModelSerializer):
 
 
 class RoleSerializer(serializers.ModelSerializer):
+
     permissions = PermissionSerializer(
         many=True,
         read_only=True,
@@ -51,13 +54,8 @@ class RoleSerializer(serializers.ModelSerializer):
         required=False,
     )
 
-    permission_count = serializers.IntegerField(
-        source="permission_count_annotation",
-        read_only=True,
-    )
+    permission_count = serializers.SerializerMethodField()
 
-    # User is not connected to Role yet.
-    # This will be implemented after the User -> Role migration.
     user_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -86,14 +84,14 @@ class RoleSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def get_permission_count(self, obj):
+        return obj.permissions.count()
+
     def get_user_count(self, obj):
-        """
-        User -> Role relationship has not been created yet.
-        Return 0 until the relationship is added.
-        """
-        return 0
+        return obj.users.count()
 
     def validate_name(self, value):
+
         value = value.strip()
 
         if not value:
@@ -104,6 +102,7 @@ class RoleSerializer(serializers.ModelSerializer):
         return value
 
     def validate_code(self, value):
+
         value = value.strip().lower()
 
         if not value:
@@ -111,11 +110,10 @@ class RoleSerializer(serializers.ModelSerializer):
                 "Role code cannot be empty."
             )
 
-        value = value.replace(" ", "_")
-
-        return value
+        return value.replace(" ", "_")
 
     def create(self, validated_data):
+
         permissions = validated_data.pop(
             "permissions",
             []
@@ -131,6 +129,7 @@ class RoleSerializer(serializers.ModelSerializer):
         return role
 
     def update(self, instance, validated_data):
+
         permissions = validated_data.pop(
             "permissions",
             None
@@ -147,3 +146,4 @@ class RoleSerializer(serializers.ModelSerializer):
             )
 
         return instance
+
