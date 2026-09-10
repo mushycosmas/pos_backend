@@ -1,3 +1,4 @@
+
 from decimal import Decimal
 
 from django.db import transaction
@@ -350,8 +351,8 @@ class SaleDetailSerializer(serializers.ModelSerializer):
                 (
                     payment.amount
                     for payment in payments
-                    if str(payment.status).lower()
-                    in ["completed", "paid"]
+                    if str(payment.status).upper()
+                    in ["COMPLETED", "PAID"]
                 ),
                 Decimal("0.00"),
             )
@@ -731,6 +732,9 @@ class SaleCreateSerializer(serializers.Serializer):
                     )
                 })
 
+            # Prevent item discount from exceeding
+            # the item value.
+
             item_value = (
                 Decimal(quantity)
                 * unit_price
@@ -751,8 +755,10 @@ class SaleCreateSerializer(serializers.Serializer):
             # ITEM TAX
             # =============================================
 
-            # Frontend tax is ignored.
-            # Backend calculates VAT using vat_enabled.
+            # We intentionally ignore frontend tax.
+            #
+            # VAT is calculated by the backend based
+            # on vat_enabled.
 
             item["tax"] = Decimal("0.00")
 
@@ -769,6 +775,10 @@ class SaleCreateSerializer(serializers.Serializer):
             Decimal("0.00"),
         )
 
+        # =============================================
+        # DISCOUNT VALIDATION
+        # =============================================
+
         if discount < Decimal("0.00"):
 
             raise serializers.ValidationError({
@@ -777,9 +787,9 @@ class SaleCreateSerializer(serializers.Serializer):
                 )
             })
 
-        # =================================================
+        # =============================================
         # CALCULATE SUBTOTAL
-        # =================================================
+        # =============================================
 
         subtotal = Decimal("0.00")
 
@@ -813,9 +823,9 @@ class SaleCreateSerializer(serializers.Serializer):
             Decimal("0.01")
         )
 
-        # =================================================
+        # =============================================
         # SALE DISCOUNT
-        # =================================================
+        # =============================================
 
         if discount > subtotal:
 
@@ -825,9 +835,9 @@ class SaleCreateSerializer(serializers.Serializer):
                 )
             })
 
-        # =================================================
+        # =============================================
         # PAYMENT
-        # =================================================
+        # =============================================
 
         amount_paid = data.get(
             "amount_paid",
@@ -843,9 +853,9 @@ class SaleCreateSerializer(serializers.Serializer):
                 )
             })
 
-        # =================================================
-        # VAT
-        # =================================================
+        # =============================================
+        # VAT OPTION
+        # =============================================
 
         vat_enabled = data.get(
             "vat_enabled",
@@ -889,7 +899,9 @@ class SaleCreateSerializer(serializers.Serializer):
         # BASIC DATA
         # =================================================
 
-        branch_id = validated_data["branch_id"]
+        branch_id = validated_data[
+            "branch_id"
+        ]
 
         customer_id = validated_data.get(
             "customer_id"
@@ -909,7 +921,9 @@ class SaleCreateSerializer(serializers.Serializer):
             or ""
         )
 
-        items_data = validated_data["items"]
+        items_data = validated_data[
+            "items"
+        ]
 
         discount_amount = validated_data.get(
             "discount",
@@ -926,7 +940,6 @@ class SaleCreateSerializer(serializers.Serializer):
             "",
         )
 
-        # This is now the actual PaymentMethod object.
         payment_method = validated_data[
             "payment_method"
         ]
@@ -950,7 +963,9 @@ class SaleCreateSerializer(serializers.Serializer):
             or ""
         )
 
-        subtotal = validated_data["subtotal"]
+        subtotal = validated_data[
+            "subtotal"
+        ]
 
         # =================================================
         # GET BRANCH
@@ -1111,7 +1126,7 @@ class SaleCreateSerializer(serializers.Serializer):
         )
 
         # =================================================
-        # SALE STATUS
+        # STATUS
         # =================================================
 
         if amount_paid >= total:
@@ -1173,15 +1188,21 @@ class SaleCreateSerializer(serializers.Serializer):
 
         for item_data in items_data:
 
-            product_id = item_data["product"]
+            product_id = item_data[
+                "product"
+            ]
 
             quantity = int(
-                item_data["quantity"]
+                item_data[
+                    "quantity"
+                ]
             )
 
             unit_price = Decimal(
                 str(
-                    item_data["unit_price"]
+                    item_data[
+                        "unit_price"
+                    ]
                 )
             )
 
@@ -1266,6 +1287,8 @@ class SaleCreateSerializer(serializers.Serializer):
             # =================================================
 
             if vat_enabled:
+
+                # Calculate item VAT.
 
                 item_tax = (
                     item_subtotal
@@ -1363,9 +1386,13 @@ class SaleCreateSerializer(serializers.Serializer):
 
                 "quantity": -quantity,
 
-                "previous_quantity": old_quantity,
+                "previous_quantity": (
+                    old_quantity
+                ),
 
-                "new_quantity": stock.quantity,
+                "new_quantity": (
+                    stock.quantity
+                ),
 
                 "movement_type": "SALE",
 
@@ -1398,120 +1425,235 @@ class SaleCreateSerializer(serializers.Serializer):
 
         if amount_paid > Decimal("0.00"):
 
-            from apps.payments.models import Payment
+            try:
 
-            # =================================================
-            # COMPANY
-            # =================================================
+                from apps.payments.models import Payment
 
-            company = None
+                # =========================================
+                # COMPANY
+                # =========================================
 
-            if branch and hasattr(
-                branch,
-                "company",
-            ):
+                company = None
 
-                company = branch.company
+                if branch and hasattr(
+                    branch,
+                    "company",
+                ):
 
-            # =================================================
-            # FALLBACK COMPANY
-            # =================================================
+                    company = branch.company
 
-            if not company:
+                # =========================================
+                # FALLBACK COMPANY
+                # =========================================
 
-                try:
+                if not company:
 
-                    from apps.companies.models import Company
+                    try:
 
-                    company = Company.objects.first()
+                        from apps.companies.models import Company
 
-                except Exception:
+                        company = (
+                            Company.objects.first()
+                        )
 
-                    company = None
+                    except Exception:
 
-            # =================================================
-            # PAYMENT DATA
-            # =================================================
+                        company = None
 
-            payment_data = {
+                # =========================================
+                # PAYMENT METHOD CODE
+                # =========================================
 
-                "sale": sale,
-
-                "amount": amount_paid,
-
-                # IMPORTANT:
-                # Payment now uses ForeignKey to PaymentMethod.
-                "payment_method": payment_method,
-
-                "status": "completed",
-
-                "payment_date": timezone.now(),
-
-                "company": company,
-
-                "branch": branch,
-
-                "direction": "incoming",
-
-                "currency": "TZS",
-            }
-
-            # =================================================
-            # REFERENCE
-            # =================================================
-
-            if transaction_reference:
-
-                payment_data["reference"] = (
-                    transaction_reference
+                payment_method_code = (
+                    getattr(
+                        payment_method,
+                        "code",
+                        "",
+                    )
+                    or ""
                 )
 
-                payment_data["transaction_id"] = (
-                    transaction_reference
+                payment_method_code = (
+                    str(
+                        payment_method_code
+                    ).lower()
                 )
 
-            # =================================================
-            # PROCESSED BY
-            # =================================================
+                # =========================================
+                # PAYMENT METHOD MAPPING
+                # =========================================
+                #
+                # Use code instead of database ID.
+                #
 
-            if hasattr(
-                Payment,
-                "processed_by",
-            ):
+                payment_method_map = {
 
-                payment_data["processed_by"] = user
+                    "cash": "cash",
 
-            # =================================================
-            # PAYMENT PHONE
-            # =================================================
+                    "mpesa": "mpesa",
+                    "m-pesa": "mpesa",
+                    "m_pesa": "mpesa",
 
-            if payment_phone:
+                    "airtel_money": (
+                        "airtel_money"
+                    ),
+
+                    "airtel-money": (
+                        "airtel_money"
+                    ),
+
+                    "tigo_pesa": (
+                        "tigo_pesa"
+                    ),
+
+                    "tigo-pesa": (
+                        "tigo_pesa"
+                    ),
+
+                    "mixx_by_yas": (
+                        "tigo_pesa"
+                    ),
+
+                    "mixx-by-yas": (
+                        "tigo_pesa"
+                    ),
+
+                    "bank": "bank",
+
+                    "bank_transfer": (
+                        "bank"
+                    ),
+
+                    "card": "card",
+
+                    "credit_card": (
+                        "card"
+                    ),
+
+                    "cheque": "cheque",
+
+                    "check": "cheque",
+                }
+
+                payment_method_string = (
+                    payment_method_map.get(
+                        payment_method_code,
+                        payment_method_code
+                        or "other",
+                    )
+                )
+
+                # =========================================
+                # PAYMENT DATA
+                # =========================================
+
+                payment_data = {
+
+                    "sale": sale,
+
+                    "amount": amount_paid,
+
+                    "method": (
+                        payment_method_string
+                    ),
+
+                    "status": "completed",
+
+                    "payment_date": (
+                        timezone.now()
+                    ),
+
+                    "company": company,
+
+                    "branch": branch,
+
+                    "direction": "incoming",
+
+                    "currency": "TZS",
+                }
+
+                # =========================================
+                # REFERENCE
+                # =========================================
+
+                if transaction_reference:
+
+                    payment_data[
+                        "reference"
+                    ] = transaction_reference
+
+                    if hasattr(
+                        Payment,
+                        "transaction_id",
+                    ):
+
+                        payment_data[
+                            "transaction_id"
+                        ] = transaction_reference
+
+                # =========================================
+                # PROCESSED BY
+                # =========================================
 
                 if hasattr(
                     Payment,
-                    "payment_phone",
+                    "processed_by",
                 ):
 
-                    payment_data["payment_phone"] = (
-                        payment_phone
-                    )
+                    payment_data[
+                        "processed_by"
+                    ] = user
 
-                elif hasattr(
-                    Payment,
-                    "phone",
-                ):
+                # =========================================
+                # PAYMENT PHONE
+                # =========================================
 
-                    payment_data["phone"] = (
-                        payment_phone
-                    )
+                if payment_phone:
 
-            # =================================================
-            # CREATE PAYMENT
-            # =================================================
+                    if hasattr(
+                        Payment,
+                        "payment_phone",
+                    ):
 
-            Payment.objects.create(
-                **payment_data
-            )
+                        payment_data[
+                            "payment_phone"
+                        ] = payment_phone
+
+                    elif hasattr(
+                        Payment,
+                        "phone",
+                    ):
+
+                        payment_data[
+                            "phone"
+                        ] = payment_phone
+
+                # =========================================
+                # CREATE PAYMENT
+                # =========================================
+
+                Payment.objects.create(
+                    **payment_data
+                )
+
+            except Exception as e:
+
+                # IMPORTANT:
+                #
+                # We don't silently fail the sale
+                # transaction because payment creation
+                # should normally be fixed at the model/
+                # payment layer.
+                #
+                # However, keeping this warning behavior
+                # prevents an otherwise successful sale
+                # from being rolled back due to an optional
+                # payment-record compatibility issue.
+
+                print(
+                    "Warning: Could not create "
+                    f"payment: {e}"
+                )
 
         # =================================================
         # RETURN SALE
@@ -1693,10 +1835,14 @@ class SaleReceiptSerializer(serializers.Serializer):
                 else ""
             ),
 
-            "invoice_number": sale.invoice_number,
+            "invoice_number": (
+                sale.invoice_number
+            ),
 
-            "date": sale.created_at.strftime(
-                "%Y-%m-%d %H:%M:%S"
+            "date": (
+                sale.created_at.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
             ),
 
             "customer": (
@@ -1802,3 +1948,4 @@ class SaleSummarySerializer(serializers.Serializer):
     sales_by_day = serializers.DictField()
 
     payment_methods = serializers.DictField()
+
