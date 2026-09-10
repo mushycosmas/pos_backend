@@ -1,3 +1,4 @@
+
 from django.db import models
 
 
@@ -68,12 +69,15 @@ class PaymentMethod(models.Model):
 
         indexes = [
             models.Index(
-                fields=["is_active"]
+                fields=["is_active"],
+                name="paymentmethod_active_idx",
             ),
             models.Index(
-                fields=["payment_type"]
+                fields=["payment_type"],
+                name="paymentmethod_type_idx",
             ),
         ]
 
     def __str__(self):
         return self.name
+

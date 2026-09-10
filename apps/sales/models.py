@@ -1,3 +1,4 @@
+
 from decimal import Decimal
 
 from django.core.validators import MinValueValidator
@@ -10,29 +11,6 @@ from django.utils import timezone
 # =========================================================
 
 class Sale(models.Model):
-
-    # =====================================================
-    # PAYMENT METHODS
-    # =====================================================
-
-    PAYMENT_METHODS = (
-        # Cash
-        ("CASH", "Cash"),
-
-        # Card
-        ("CARD", "Card"),
-
-        # Mobile Money
-        ("M-PESA", "M-PESA"),
-        ("TIGO-PESA", "Tigo Pesa"),
-        ("AIRTEL-MONEY", "Airtel Money"),
-        ("HALOPESA", "HaloPesa"),
-        ("MIXX-BY-YAS", "Mixx by Yas"),
-        ("EZY-PESA", "EzyPesa"),
-
-        # Bank
-        ("BANK_TRANSFER", "Bank Transfer"),
-    )
 
     # =====================================================
     # STATUS
@@ -59,12 +37,6 @@ class Sale(models.Model):
 
     # =====================================================
     # CREATED BY
-    #
-    # The authenticated user who created/processed the sale.
-    #
-    # Do NOT trust the frontend to provide this value.
-    # It should be assigned from request.user in the serializer
-    # or view.
     # =====================================================
 
     created_by = models.ForeignKey(
@@ -100,10 +72,6 @@ class Sale(models.Model):
 
     # =====================================================
     # CUSTOMER SNAPSHOT
-    #
-    # Stores customer information at the time of sale.
-    # This preserves the information even if the customer
-    # record is later changed or deleted.
     # =====================================================
 
     customer_name = models.CharField(
@@ -140,9 +108,6 @@ class Sale(models.Model):
         ],
     )
 
-    # VAT percentage
-    # Example: 18.00 = 18%
-
     tax_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -171,14 +136,30 @@ class Sale(models.Model):
     )
 
     # =====================================================
-    # PAYMENT
+    # PAYMENT METHOD
+    #
+    # ForeignKey to paymentmethods.PaymentMethod.
+    #
+    # Django automatically creates:
+    #
+    #     payment_method_id
+    #
+    # Example:
+    #
+    #     payment_method_id = 1
     # =====================================================
 
-    payment_method = models.CharField(
-        max_length=50,
-        choices=PAYMENT_METHODS,
-        default="CASH",
+    payment_method = models.ForeignKey(
+        "paymentmethods.PaymentMethod",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sales",
     )
+
+    # =====================================================
+    # AMOUNT PAID
+    # =====================================================
 
     amount_paid = models.DecimalField(
         max_digits=15,
@@ -188,6 +169,10 @@ class Sale(models.Model):
             MinValueValidator(Decimal("0.00"))
         ],
     )
+
+    # =====================================================
+    # CHANGE
+    # =====================================================
 
     change = models.DecimalField(
         max_digits=15,
@@ -199,18 +184,7 @@ class Sale(models.Model):
     )
 
     # =====================================================
-    # MOBILE MONEY / BANK DETAILS
-    #
-    # Used for:
-    # - M-PESA
-    # - Tigo Pesa
-    # - Airtel Money
-    # - HaloPesa
-    # - Mixx by Yas
-    # - EzyPesa
-    # - Bank Transfer
-    #
-    # Not required for cash/card payments.
+    # PAYMENT PHONE
     # =====================================================
 
     payment_phone = models.CharField(
@@ -219,6 +193,10 @@ class Sale(models.Model):
         blank=True,
         help_text="Phone number used for mobile money payment.",
     )
+
+    # =====================================================
+    # TRANSACTION REFERENCE
+    # =====================================================
 
     transaction_reference = models.CharField(
         max_length=100,
@@ -263,10 +241,7 @@ class Sale(models.Model):
     # =====================================================
 
     def __str__(self):
-        return (
-            f"{self.invoice_number or f'Sale #{self.id}'} "
-            f"- {self.total}"
-        )
+        return f"{self.invoice_number or f'Sale #{self.id}'} - {self.total}"
 
     # =====================================================
     # SAVE
@@ -277,16 +252,13 @@ class Sale(models.Model):
         is_new = self.pk is None
 
         # -------------------------------------------------
-        # CREATE INVOICE NUMBER AFTER ID EXISTS
+        # CREATE SALE FIRST TO GET ID
         # -------------------------------------------------
 
         if is_new and not self.invoice_number:
-
             super().save(*args, **kwargs)
 
-            self.invoice_number = (
-                f"INV-{self.id:06d}"
-            )
+            self.invoice_number = f"INV-{self.id:06d}"
 
             super().save(
                 update_fields=["invoice_number"]
@@ -404,20 +376,13 @@ class SaleItem(models.Model):
 
     def save(self, *args, **kwargs):
 
-        # -------------------------------------------------
-        # CALCULATE ITEM TOTAL
-        # -------------------------------------------------
-
         subtotal = (
-            Decimal(self.quantity)
-            * self.unit_price
+            Decimal(self.quantity) * self.unit_price
         )
 
         subtotal -= self.discount
-
         subtotal += self.tax
 
-        # Prevent negative totals
         if subtotal < Decimal("0.00"):
             subtotal = Decimal("0.00")
 
@@ -430,6 +395,4 @@ class SaleItem(models.Model):
     # =====================================================
 
     def __str__(self):
-        return (
-            f"{self.product.name} x {self.quantity}"
-        )
+        return f"{self.product.name} x {self.quantity}"
