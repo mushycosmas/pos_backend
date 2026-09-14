@@ -23,7 +23,7 @@ from .serializers import (
     SaleSummarySerializer,
 )
 
-# Inventory models
+# Inventory
 from apps.inventory.models import Stock, StockMovement
 
 
@@ -40,7 +40,7 @@ class SaleViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     # =====================================================
-    # QUERYSET
+    # BASE QUERYSET
     # =====================================================
 
     queryset = (
@@ -49,6 +49,7 @@ class SaleViewSet(viewsets.ModelViewSet):
             "branch",
             "customer",
             "created_by",
+            "payment_method",
         )
         .prefetch_related(
             "items__product"
@@ -128,6 +129,49 @@ class SaleViewSet(viewsets.ModelViewSet):
         return SaleDetailSerializer
 
     # =====================================================
+    # CHECK CASHIER
+    # =====================================================
+
+    def is_cashier(self):
+
+        user = self.request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        role = getattr(user, "role", None)
+
+        # Role is a ForeignKey/object
+        if role is not None:
+
+            role_name = getattr(
+                role,
+                "name",
+                ""
+            )
+
+            if str(role_name).strip().lower() == "cashier":
+                return True
+
+            # In case your Role model uses "code"
+            role_code = getattr(
+                role,
+                "code",
+                ""
+            )
+
+            if str(role_code).strip().lower() == "cashier":
+                return True
+
+        # In case role is directly stored as a string
+        if isinstance(role, str):
+
+            if role.strip().lower() == "cashier":
+                return True
+
+        return False
+
+    # =====================================================
     # QUERYSET
     # =====================================================
 
@@ -135,9 +179,28 @@ class SaleViewSet(viewsets.ModelViewSet):
 
         queryset = super().get_queryset()
 
-        # -------------------------------------------------
+        user = self.request.user
+
+        # =================================================
+        # CASHIER RESTRICTION
+        # =================================================
+        #
+        # Cashier can ONLY see sales created by herself.
+        #
+        # Other roles can see all sales.
+        #
+        # This is enforced on the backend for security.
+        # =================================================
+
+        if self.is_cashier():
+
+            queryset = queryset.filter(
+                created_by=user
+            )
+
+        # =================================================
         # DATE FILTERS
-        # -------------------------------------------------
+        # =================================================
 
         start_date = self.request.query_params.get(
             "start_date"
@@ -148,11 +211,13 @@ class SaleViewSet(viewsets.ModelViewSet):
         )
 
         if start_date:
+
             queryset = queryset.filter(
                 created_at__date__gte=start_date
             )
 
         if end_date:
+
             queryset = queryset.filter(
                 created_at__date__lte=end_date
             )
@@ -170,11 +235,9 @@ class SaleViewSet(viewsets.ModelViewSet):
         **kwargs
     ):
         """
-        Disable direct retrieve endpoint if the application
-        does not require GET /sales/{id}/.
+        Direct GET /sales/{id}/ is disabled.
 
-        Receipt endpoint can still be used through:
-        GET /sales/{id}/receipt/
+        Receipt endpoint remains available.
         """
 
         return Response(
@@ -199,18 +262,20 @@ class SaleViewSet(viewsets.ModelViewSet):
         """
         Create a new sale.
 
-        The authenticated user is NOT accepted from the
-        frontend.
+        The frontend cannot choose created_by.
 
-        SaleCreateSerializer gets request.user from the
-        serializer context and stores it as created_by.
+        SaleCreateSerializer gets the authenticated user
+        from serializer context and stores it as created_by.
         """
 
-        # -------------------------------------------------
-        # AUTHENTICATION CHECK
-        # -------------------------------------------------
+        # =================================================
+        # AUTHENTICATION
+        # =================================================
 
-        if not request.user or not request.user.is_authenticated:
+        if (
+            not request.user
+            or not request.user.is_authenticated
+        ):
 
             return Response(
                 {
@@ -220,14 +285,15 @@ class SaleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # -------------------------------------------------
+        # =================================================
         # SERIALIZER
-        # -------------------------------------------------
+        # =================================================
 
         serializer = self.get_serializer(
             data=request.data,
             context={
                 **self.get_serializer_context(),
+
                 "payment_data": request.data.get(
                     "payment",
                     None
@@ -239,15 +305,15 @@ class SaleViewSet(viewsets.ModelViewSet):
             raise_exception=True
         )
 
-        # -------------------------------------------------
-        # SAVE SALE
-        # -------------------------------------------------
+        # =================================================
+        # SAVE
+        # =================================================
 
         sale = serializer.save()
 
-        # -------------------------------------------------
+        # =================================================
         # RESPONSE
-        # -------------------------------------------------
+        # =================================================
 
         return Response(
             {
@@ -276,17 +342,20 @@ class SaleViewSet(viewsets.ModelViewSet):
         pk=None
     ):
         """
-        Cancel a sale and restore its stock.
+        Cancel a sale and restore stock.
 
-        All stock changes are performed inside a database
-        transaction and the affected stock row is locked.
+        Cashier can only cancel her own sale because
+        get_object() uses the restricted queryset.
         """
 
-        # -------------------------------------------------
-        # AUTHENTICATION CHECK
-        # -------------------------------------------------
+        # =================================================
+        # AUTHENTICATION
+        # =================================================
 
-        if not request.user or not request.user.is_authenticated:
+        if (
+            not request.user
+            or not request.user.is_authenticated
+        ):
 
             return Response(
                 {
@@ -296,15 +365,22 @@ class SaleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_401_UNAUTHORIZED,
             )
 
-        # -------------------------------------------------
+        # =================================================
         # GET SALE
-        # -------------------------------------------------
+        # =================================================
+        #
+        # IMPORTANT:
+        # get_object() uses get_queryset().
+        #
+        # Therefore a cashier cannot cancel another
+        # cashier's sale even if she knows the sale ID.
+        # =================================================
 
         sale = self.get_object()
 
-        # -------------------------------------------------
-        # CHECK CURRENT STATUS
-        # -------------------------------------------------
+        # =================================================
+        # CHECK STATUS
+        # =================================================
 
         if sale.status == "CANCELLED":
 
@@ -316,9 +392,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # -------------------------------------------------
+        # =================================================
         # VALIDATE CANCELLATION
-        # -------------------------------------------------
+        # =================================================
 
         serializer = self.get_serializer(
             data=request.data,
@@ -337,9 +413,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             ""
         )
 
-        # -------------------------------------------------
+        # =================================================
         # RESTORE STOCK
-        # -------------------------------------------------
+        # =================================================
 
         sale_items = (
             sale.items
@@ -359,9 +435,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                 .first()
             )
 
-            # -------------------------------------------------
+            # =================================================
             # STOCK EXISTS
-            # -------------------------------------------------
+            # =================================================
 
             if stock:
 
@@ -375,9 +451,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                     ]
                 )
 
-                # -------------------------------------------------
+                # =================================================
                 # STOCK MOVEMENT
-                # -------------------------------------------------
+                # =================================================
 
                 StockMovement.objects.create(
                     product=item.product,
@@ -394,9 +470,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                     notes=reason,
                 )
 
-            # -------------------------------------------------
+            # =================================================
             # STOCK DOES NOT EXIST
-            # -------------------------------------------------
+            # =================================================
 
             else:
 
@@ -421,15 +497,15 @@ class SaleViewSet(viewsets.ModelViewSet):
                     notes=reason,
                 )
 
-        # -------------------------------------------------
+        # =================================================
         # UPDATE SALE STATUS
-        # -------------------------------------------------
+        # =================================================
 
         sale.status = "CANCELLED"
 
-        # -------------------------------------------------
-        # ADD CANCELLATION NOTE
-        # -------------------------------------------------
+        # =================================================
+        # CANCELLATION NOTE
+        # =================================================
 
         cancellation_note = (
             f"Cancelled: {reason}"
@@ -452,11 +528,16 @@ class SaleViewSet(viewsets.ModelViewSet):
 
             sale.notes = cancellation_note
 
-        sale.save()
+        sale.save(
+            update_fields=[
+                "status",
+                "notes",
+            ]
+        )
 
-        # -------------------------------------------------
+        # =================================================
         # CANCEL PAYMENTS
-        # -------------------------------------------------
+        # =================================================
 
         from apps.payments.models import Payment
 
@@ -466,9 +547,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             status="CANCELLED"
         )
 
-        # -------------------------------------------------
+        # =================================================
         # RESPONSE
-        # -------------------------------------------------
+        # =================================================
 
         return Response(
             {
@@ -496,9 +577,13 @@ class SaleViewSet(viewsets.ModelViewSet):
         pk=None
     ):
         """
-        Return receipt data for a sale.
+        Return receipt data.
+
+        Cashier can only access receipts belonging
+        to her own sales.
         """
 
+        # get_object() respects cashier restriction
         sale = self.get_object()
 
         serializer = self.get_serializer(
@@ -527,11 +612,22 @@ class SaleViewSet(viewsets.ModelViewSet):
         request
     ):
         """
-        Sales summary for dashboard/reporting.
+        Sales summary.
 
-        Supports the same start_date and end_date filters
-        as the normal sales endpoint.
+        Cashier:
+            Only her own sales.
+
+        Other roles:
+            All sales.
+
+        Supports:
+            start_date
+            end_date
         """
+
+        # =================================================
+        # GET FILTERED QUERYSET
+        # =================================================
 
         queryset = self.get_queryset()
 
@@ -732,6 +828,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "success": True,
+
                 "data": {
 
                     "total_sales": float(
