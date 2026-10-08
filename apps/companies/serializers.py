@@ -8,26 +8,33 @@ class CompanySerializer(serializers.ModelSerializer):
         model = Company
 
         fields = [
-            'id',
-            'name',
-            'legal_name',
-            'registration_number',
-            'tax_number',
-            'phone',
-            'email',
-            'website',
-            'address',
-            'city',
-            'country',
-            'logo',
-            'currency',
-            'is_active',
-            'created_at',
-            'updated_at',
+            "id",
+            "name",
+            "legal_name",
+            "registration_number",
+            "tax_number",
+            "phone",
+            "email",
+            "website",
+            "address",
+            "city",
+            "country",
+            "logo",
+            "currency",
+            "is_active",
+            "created_at",
+            "updated_at",
         ]
 
         read_only_fields = [
-            'id',
-            'created_at',
-            'updated_at',
+            "id",
+            "created_at",
+            "updated_at",
         ]
+
+        extra_kwargs = {
+            "logo": {
+                "required": False,
+                "allow_null": True,
+            },
+        }

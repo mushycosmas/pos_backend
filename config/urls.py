@@ -1,11 +1,7 @@
-"""
-URL configuration for config project.
-
-The `urlpatterns` list routes URLs to views.
-"""
-
 from django.contrib import admin
 from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
 
 
 urlpatterns = [
@@ -15,7 +11,7 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'admin/',
+        "admin/",
         admin.site.urls
     ),
 
@@ -24,8 +20,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/company/',
-        include('apps.companies.urls')
+        "api/v1/company/",
+        include("apps.companies.urls")
     ),
 
     # =========================================================
@@ -33,8 +29,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.accounts.urls')
+        "api/v1/",
+        include("apps.accounts.urls")
     ),
 
     # =========================================================
@@ -42,21 +38,22 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.branches.urls')
+        "api/v1/",
+        include("apps.branches.urls")
     ),
+
     path(
-    'api/v1/auth/',
-    include('apps.accounts.urls')
-   ),
+        "api/v1/auth/",
+        include("apps.accounts.urls")
+    ),
 
     # =========================================================
     # CUSTOMERS
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.customers.urls')
+        "api/v1/",
+        include("apps.customers.urls")
     ),
 
     # =========================================================
@@ -64,8 +61,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.expenses.urls')
+        "api/v1/",
+        include("apps.expenses.urls")
     ),
 
     # =========================================================
@@ -73,8 +70,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.payments.urls')
+        "api/v1/",
+        include("apps.payments.urls")
     ),
 
     # =========================================================
@@ -82,8 +79,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.products.urls')
+        "api/v1/",
+        include("apps.products.urls")
     ),
 
     # =========================================================
@@ -91,8 +88,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.purchases.urls')
+        "api/v1/",
+        include("apps.purchases.urls")
     ),
 
     # =========================================================
@@ -100,8 +97,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/inventory/',
-        include('apps.inventory.urls')
+        "api/v1/inventory/",
+        include("apps.inventory.urls")
     ),
 
     # =========================================================
@@ -109,8 +106,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.reports.urls')
+        "api/v1/",
+        include("apps.reports.urls")
     ),
 
     # =========================================================
@@ -118,8 +115,8 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.sales.urls')
+        "api/v1/",
+        include("apps.sales.urls")
     ),
 
     # =========================================================
@@ -127,16 +124,36 @@ urlpatterns = [
     # =========================================================
 
     path(
-        'api/v1/',
-        include('apps.suppliers.urls')
-    ),
-    
-     path(
         "api/v1/",
-        include("apps.returns.urls"),
+        include("apps.suppliers.urls")
     ),
-     path(
+
+    # =========================================================
+    # RETURNS
+    # =========================================================
+
+    path(
         "api/v1/",
-        include("apps.roles.urls"),
+        include("apps.returns.urls")
+    ),
+
+    # =========================================================
+    # ROLES
+    # =========================================================
+
+    path(
+        "api/v1/",
+        include("apps.roles.urls")
     ),
 ]
+
+
+# =============================================================
+# MEDIA FILES - DEVELOPMENT
+# =============================================================
+
+if settings.DEBUG:
+    urlpatterns += static(
+        settings.MEDIA_URL,
+        document_root=settings.MEDIA_ROOT
+    )
