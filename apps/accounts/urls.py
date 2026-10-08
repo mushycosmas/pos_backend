@@ -6,6 +6,7 @@ from .views import (
     UserViewSet,
     LoginView,
     MeView,
+    CompanyRegistrationView,
 )
 
 
@@ -16,9 +17,9 @@ from .views import (
 router = DefaultRouter()
 
 router.register(
-    'users',
+    "users",
     UserViewSet,
-    basename='users'
+    basename="users"
 )
 
 
@@ -33,9 +34,19 @@ urlpatterns = [
     # --------------------------------------------------------
 
     path(
-        'login/',
+        "login/",
         LoginView.as_view(),
-        name='login'
+        name="login"
+    ),
+
+    # --------------------------------------------------------
+    # Company Registration
+    # --------------------------------------------------------
+
+    path(
+        "register-company/",
+        CompanyRegistrationView.as_view(),
+        name="register-company"
     ),
 
     # --------------------------------------------------------
@@ -43,9 +54,9 @@ urlpatterns = [
     # --------------------------------------------------------
 
     path(
-        'me/',
+        "me/",
         MeView.as_view(),
-        name='me'
+        name="me"
     ),
 ]
 
