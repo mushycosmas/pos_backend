@@ -1,96 +1,145 @@
-# views.py
-from rest_framework.viewsets import ModelViewSet
-from rest_framework.permissions import AllowAny
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework import status
 from django.db import transaction
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
 
 from .models import Stock, StockMovement
 from .serializers import (
     StockSerializer,
-    StockMovementSerializer
+    StockMovementSerializer,
 )
 
 
+def get_requested_branch_id(request):
+    value = (
+        request.query_params.get("branch")
+        or request.query_params.get("branch_id")
+    )
+
+    if value in (None, ""):
+        return None
+
+    try:
+        branch_id = int(value)
+    except (TypeError, ValueError):
+        return None
+
+    return branch_id if branch_id > 0 else None
+
+
 class StockViewSet(ModelViewSet):
-    queryset = Stock.objects.all()
     serializer_class = StockSerializer
     permission_classes = [AllowAny]
 
-    # =========================================================
-    # ADD THIS CUSTOM ACTION
-    # =========================================================
-    @action(detail=True, methods=['patch'], url_path='adjust')
+    def get_queryset(self):
+        queryset = Stock.objects.select_related(
+            "product",
+            "product__category",
+            "branch",
+        )
+
+        branch_value = (
+            self.request.query_params.get("branch")
+            or self.request.query_params.get("branch_id")
+        )
+
+        # Require a branch for list requests.
+        if self.action == "list":
+            branch_id = get_requested_branch_id(self.request)
+
+            if branch_id is None:
+                return queryset.none()
+
+            return queryset.filter(branch_id=branch_id)
+
+        # For detail requests, honor branch when supplied.
+        if branch_value not in (None, ""):
+            branch_id = get_requested_branch_id(self.request)
+
+            if branch_id is None:
+                return queryset.none()
+
+            queryset = queryset.filter(branch_id=branch_id)
+
+        return queryset
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="adjust",
+    )
     def adjust_stock(self, request, pk=None):
-        """Adjust stock quantity and record the movement."""
         stock = self.get_object()
-        
-        # Get data from request
-        quantity = request.data.get('quantity')
-        movement_type = request.data.get('type', '').upper()
-        reason = request.data.get('reason', '')
-        reference = request.data.get('reference', '')
-        notes = request.data.get('notes', '')
-        
-        # Validate quantity
+
+        quantity = request.data.get("quantity")
+        movement_type = str(
+            request.data.get("type", "")
+        ).upper()
+        reason = str(
+            request.data.get("reason", "")
+        ).strip()
+        reference = request.data.get("reference", "")
+        notes = request.data.get("notes", "")
+
         try:
             quantity = int(quantity)
         except (TypeError, ValueError):
             return Response(
-                {'error': 'quantity must be a valid integer'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "quantity must be a valid integer"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
+
         if quantity <= 0:
             return Response(
-                {'error': 'quantity must be greater than zero'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "quantity must be greater than zero"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Validate type
-        valid_types = ['ADD', 'REMOVE']
-        if movement_type not in valid_types:
+
+        if movement_type not in ("ADD", "REMOVE"):
             return Response(
-                {'error': f'type must be one of: {", ".join(valid_types)}'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "type must be ADD or REMOVE"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Validate reason
-        if not reason or not reason.strip():
+
+        if not reason:
             return Response(
-                {'error': 'reason is required'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "reason is required"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        # Map to StockMovement types
-        type_mapping = {
-            'ADD': 'IN',
-            'REMOVE': 'OUT',
-        }
-        movement_type_db = type_mapping.get(movement_type, 'ADJUSTMENT')
-        
+
         with transaction.atomic():
-            # Calculate new quantity
+            stock = Stock.objects.select_for_update().get(
+                pk=stock.pk
+            )
+
             previous_quantity = stock.quantity
-            
-            if movement_type == 'ADD':
+
+            if movement_type == "ADD":
                 new_quantity = previous_quantity + quantity
-            elif movement_type == 'REMOVE':
+                movement_type_db = "IN"
+            else:
                 if quantity > previous_quantity:
                     return Response(
-                        {'error': f'Insufficient stock. Available: {previous_quantity}'},
-                        status=status.HTTP_400_BAD_REQUEST
+                        {
+                            "error": (
+                                "Insufficient stock. "
+                                f"Available: {previous_quantity}"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
+
                 new_quantity = previous_quantity - quantity
-            else:
-                new_quantity = quantity
-            
-            # Update stock
+                movement_type_db = "OUT"
+
             stock.quantity = new_quantity
-            stock.save(update_fields=['quantity', 'last_updated'])
-            
-            # Create movement record
+            stock.save(update_fields=[
+                "quantity",
+                "last_updated",
+            ])
+
             movement = StockMovement.objects.create(
                 product=stock.product,
                 branch=stock.branch,
@@ -98,20 +147,55 @@ class StockViewSet(ModelViewSet):
                 previous_quantity=previous_quantity,
                 new_quantity=new_quantity,
                 movement_type=movement_type_db,
-                reference=reference or '',
+                reference=reference or "",
                 notes=notes or reason,
-                created_by=request.user if request.user.is_authenticated else None
+                created_by=(
+                    request.user
+                    if request.user.is_authenticated
+                    else None
+                ),
             )
-        
-        # Return response
-        serializer = self.get_serializer(stock)
-        return Response({
-            'stock': serializer.data,
-            'movement': StockMovementSerializer(movement).data
-        }, status=status.HTTP_200_OK)
+
+        return Response(
+            {
+                "stock": StockSerializer(stock).data,
+                "movement": StockMovementSerializer(movement).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class StockMovementViewSet(ModelViewSet):
-    queryset = StockMovement.objects.all()
     serializer_class = StockMovementSerializer
     permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        queryset = StockMovement.objects.select_related(
+            "product",
+            "branch",
+            "created_by",
+        )
+
+        branch_value = (
+            self.request.query_params.get("branch")
+            or self.request.query_params.get("branch_id")
+        )
+
+        # Movement lists must be scoped to a selected branch.
+        if self.action == "list":
+            branch_id = get_requested_branch_id(self.request)
+
+            if branch_id is None:
+                return queryset.none()
+
+            return queryset.filter(branch_id=branch_id)
+
+        if branch_value not in (None, ""):
+            branch_id = get_requested_branch_id(self.request)
+
+            if branch_id is None:
+                return queryset.none()
+
+            queryset = queryset.filter(branch_id=branch_id)
+
+        return queryset
