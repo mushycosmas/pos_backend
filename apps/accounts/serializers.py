@@ -76,11 +76,20 @@ class UserSerializer(serializers.ModelSerializer):
 # USER CREATE SERIALIZER
 # ============================================================
 
+
+# ============================================================
+# USER CREATE SERIALIZER
+# ============================================================
+
 class UserCreateSerializer(serializers.ModelSerializer):
+
+    DEFAULT_PASSWORD = "ChangeMe@123"
 
     password = serializers.CharField(
         write_only=True,
-        min_length=8
+        min_length=8,
+        required=False,
+        allow_blank=True
     )
 
     class Meta:
@@ -104,18 +113,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
 
-        password = validated_data.pop(
-            "password"
-        )
+        password = validated_data.pop("password", None)
 
-        user = User(
-            **validated_data
-        )
+        # Assign the default when no password is supplied.
+        if not password or not password.strip():
+            password = self.DEFAULT_PASSWORD
 
-        user.set_password(
-            password
-        )
-
+        user = User(**validated_data)
+        user.set_password(password)
         user.save()
 
         return user
