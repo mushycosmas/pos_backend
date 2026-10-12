@@ -60,7 +60,11 @@ class Product(models.Model):
 
     # BASIC INFORMATION
     name = models.CharField(max_length=200)
-    sku = models.CharField(max_length=50, unique=True)
+    sku = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+    )
 
     barcode = models.CharField(
         max_length=50,
