@@ -1,3 +1,4 @@
+
 from rest_framework import serializers
 
 from .models import Stock, StockMovement
@@ -9,17 +10,34 @@ class StockSerializer(serializers.ModelSerializer):
         source="product.name",
         read_only=True,
     )
+
     product_sku = serializers.CharField(
         source="product.sku",
         read_only=True,
     )
 
-    # Category details; a product may have no category
+    # Brand details
+    # Assumes Product has a ForeignKey named "brand"
+    # pointing to a Brand model with id and name fields.
+    brand_id = serializers.IntegerField(
+        source="product.brand.id",
+        read_only=True,
+        allow_null=True,
+    )
+
+    brand_name = serializers.CharField(
+        source="product.brand.name",
+        read_only=True,
+        allow_null=True,
+    )
+
+    # Category details
     category_id = serializers.IntegerField(
         source="product.category.id",
         read_only=True,
         allow_null=True,
     )
+
     category_name = serializers.CharField(
         source="product.category.name",
         read_only=True,
@@ -39,6 +57,7 @@ class StockSerializer(serializers.ModelSerializer):
         decimal_places=2,
         read_only=True,
     )
+
     selling_price = serializers.DecimalField(
         source="product.selling_price",
         max_digits=15,
@@ -63,6 +82,8 @@ class StockSerializer(serializers.ModelSerializer):
             "product",
             "product_name",
             "product_sku",
+            "brand_id",
+            "brand_name",
             "category_id",
             "category_name",
             "branch",
@@ -84,6 +105,8 @@ class StockSerializer(serializers.ModelSerializer):
             "created_at",
             "product_name",
             "product_sku",
+            "brand_id",
+            "brand_name",
             "category_id",
             "category_name",
             "branch_name",
@@ -128,6 +151,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
         source="product.name",
         read_only=True,
     )
+
     product_sku = serializers.CharField(
         source="product.sku",
         read_only=True,
